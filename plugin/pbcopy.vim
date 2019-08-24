@@ -91,15 +91,29 @@ function! s:getShellEscapedLines(listOfLines)
     endif
 endfunction
 
-function! s:sendTextToPbCopy(escapedText)
+if has('nvim')
+    function! s:OnEvent(job_id, data, event) dict
+        if a:event == 'stdout'
+            call chansend(2, join(a:data))
+        endif
+    endfunction
+endif
+
+function! s:sendTextToPbCopy(text)
     try
         if s:isRunningLocally()
-            " Call the UNIX echo command. The -n means do not output trailing newline.
-            execute "silent !echo -n " . a:escapedText . " | " . g:vim_pbcopy_local_cmd
+            let cmd = g:vim_pbcopy_local_cmd
+        else
+            let cmd = g:vim_pbcopy_remote_cmd
+        endif
+
+        if has('nvim')
+            call jobstart(["sh", "-c", "cat <<'EOF' |\n" . a:text . "\nEOF\n" . cmd], { 'on_stdout': function('s:OnEvent') })
         else
             " Call the UNIX echo command. The -n means do not output trailing newline.
-            execute "silent !echo -n " . a:escapedText . " | " . g:vim_pbcopy_remote_cmd
+            execute "silent !echo -n " . a:text . " | " . cmd
         endif
+
         redraw! " Fix up the screen
         return 0
     catch /E121/
@@ -126,8 +140,6 @@ function! s:copyVisualSelection(type, ...)
       silent exe "normal! `[v`]y"
     endif
 
-    let lines = split(@@, "\n")
-
     " -- " Transform individual lines
     " -- let i = 0
     " -- while i < len(lines)
@@ -138,8 +150,13 @@ function! s:copyVisualSelection(type, ...)
     " -- " Transform entire list of lines
     " -- let transformedLines = s:getTransformedLines(lines)
 
-    let escapedLines = s:getShellEscapedLines(lines)
-    let error =  s:sendTextToPbCopy(escapedLines)
+    if has('nvim')
+        let text = @@
+    else
+        let text = s:getShellEscapedLines(split(@@, "\n"))
+    endif
+
+    let error =  s:sendTextToPbCopy(text)
 
     " Reset the selection and register contents
     let &selection = sel_save
